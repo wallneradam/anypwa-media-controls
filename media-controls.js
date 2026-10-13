@@ -1,7 +1,7 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.0.0
+ * @version 1.1.0
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
@@ -736,10 +736,8 @@
         return state();
     };
 
-    const dispose = () => {
-        window.removeEventListener('pointerdown', forwardPointerPress, { capture: true });
-        document.removeEventListener('pause', recordPause, true);
-        for (const type of ['loadeddata', 'playing']) document.removeEventListener(type, scheduleReconcile, true);
+    // Stop enforcing preferences without changing the website's current stream or controls.
+    const disable = () => {
         desired = null;
         stopLookup();
         stopHLS();
@@ -747,7 +745,24 @@
         monitorArtwork(false);
         if (controlTimer !== null) clearInterval(controlTimer);
         controlTimer = null;
+        pending = null;
+        attemptedKey = null;
+        failedKey = null;
+        qualityKey = null;
+        qualityPlayer = null;
+        lastPlayer = null;
+        currentStart = null;
+        interruption = null;
+        backgroundSwitchAt = null;
+        lastPublication = null;
+    };
+
+    const dispose = () => {
+        window.removeEventListener('pointerdown', forwardPointerPress, { capture: true });
+        document.removeEventListener('pause', recordPause, true);
+        for (const type of ['loadeddata', 'playing']) document.removeEventListener(type, scheduleReconcile, true);
+        disable();
         delete window.__anyPWAMediaControls;
     };
-    window.__anyPWAMediaControls = Object.freeze({ state, setAudioOnly, setQuality, refreshArtwork, configure, dispose });
+    window.__anyPWAMediaControls = Object.freeze({ state, setAudioOnly, setQuality, refreshArtwork, configure, disable, dispose });
 })();

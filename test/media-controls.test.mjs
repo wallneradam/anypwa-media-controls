@@ -182,6 +182,83 @@ function hlsFixture({ host = 'm.youtube.com', paused = false, playerState } = {}
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('inactive controls preserve website audio mode and quality without timers or player writes', () => {
+    for (const host of ['music.youtube.com', 'm.youtube.com']) {
+        const f = fixture({ host, mse: true });
+        f.nativeState.player.audioOnly = true;
+        f.response.playerConfig = { audioConfig: { playAudioOnly: false } };
+        f.controls.disable();
+        for (const entry of f.documentListeners.filter(entry => entry.type === 'loadeddata' || entry.type === 'playing')) {
+            entry.listener({ target: f.media });
+        }
+        assert.equal(f.timers.size, 0);
+        assert.equal(f.timeouts.size, 0);
+        assert.deepEqual(f.calls, []);
+        assert.equal(f.nativeState.player.audioOnly, true);
+        const parsed = vm.runInContext('JSON.parse(\'{"playerConfig":{"audioConfig":{"playAudioOnly":false}},"videoDetails":{"videoId":"next"}}\')', f.context);
+        assert.equal(parsed.playerConfig.audioConfig.playAudioOnly, false);
+        assert.equal(f.windowListeners.filter(entry => entry.type === 'pointerdown').length, 1);
+    }
+});
+
+test('inactive controls pass through the website player response unchanged', async () => {
+    const response = { json: async () => ({ videoDetails: { videoId: 'next' },
+        playerConfig: { audioConfig: { playAudioOnly: false } } }) };
+    const promise = Promise.resolve(response);
+    const f = fixture({ host: 'm.youtube.com', mse: true, fetch: () => promise });
+    f.controls.disable();
+    const reply = f.context.fetch('/youtubei/v1/player');
+    assert.equal(reply, promise);
+    assert.equal(await reply, response);
+    assert.equal((await response.json()).playerConfig.audioConfig.playAudioOnly, false);
+    assert.deepEqual(f.calls, []);
+});
+
+test('disabling active controls preserves playback and later website choices, and can be reenabled', () => {
+    const f = fixture({ paused: true });
+    f.controls.configure({ audioOnly: true, quality: 'auto' });
+    const before = f.calls.length;
+    f.controls.disable();
+    assert.equal(f.calls.length, before);
+    assert.equal(f.nativeState.player.audioOnly, true);
+    assert.equal(f.media.paused, true);
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.images.filter(image => image.isConnected).length, 0);
+    f.nativeState.player.audioOnly = false;
+    for (const entry of f.documentListeners.filter(entry => entry.type === 'loadeddata' || entry.type === 'playing')) {
+        entry.listener({ target: f.media });
+    }
+    for (const callback of [...f.timeouts.values()]) callback();
+    assert.equal(f.calls.length, before);
+    assert.equal(f.nativeState.player.audioOnly, false);
+    f.controls.configure({ audioOnly: true, quality: 'auto' });
+    assert.equal(f.nativeState.player.audioOnly, true);
+    assert.ok(f.calls.length > before);
+    f.controls.dispose();
+});
+
+test('disabling controls cancels a pending HLS lookup and ignores its late response', async () => {
+    const f = hlsFixture();
+    let complete;
+    let signal;
+    f.context.fetch = (_, options) => {
+        signal = options.signal;
+        return new Promise(resolve => { complete = resolve; });
+    };
+    f.controls.configure({ audioOnly: false, quality: 'hd1080' });
+    assert.ok(signal);
+    f.controls.disable();
+    assert.equal(signal.aborted, true);
+    complete({ ok: true, text: async () => JSON.stringify({ playabilityStatus: { status: 'OK' },
+        videoDetails: { videoId: 'clip' }, streamingData: { hlsManifestUrl: hlsMaster } }) });
+    await settle();
+    await settle();
+    assert.equal(f.loads().length, 0);
+    assert.equal(f.fetches.length, 0);
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.timers.size, 0);
+});
+
 function stalledStartupFixture(storage = new Map()) {
     const f = fixture({ host: 'm.youtube.com' });
     let now = 10000;

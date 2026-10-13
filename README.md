@@ -22,15 +22,23 @@ The app ships with a copy of `media-controls.js` and checks this repository for 
 
 Every push to `main` reaches the installed apps.
 
+## Native control
+
+The adapter is passive until the app calls `configure({audioOnly, quality, background})`.
+Version 1.1.0 adds the backwards-compatible `disable()` method: it stops preference enforcement and artwork polling,
+cancels pending HLS work, and leaves the website's current stream, pause state and choices
+untouched. The real pointer-press compatibility forwarding stays available while disabled.
+The app calls `disable()` when the Media Controls purchase is absent or revoked.
+
 ## Versioning
 
 The `@version` line in the leading comment follows semantic versioning:
 
-- **MAJOR** changes only when the interface between the script and the app changes: the
+- **MAJOR** changes only when an incompatible change is made to the interface between the script and the app: the
   arguments of `configure({audioOnly, quality, background})`, the result of `state()`, or
   the messages posted to the `anyPWAMediaControls` handler. Apps keep using the last copy
   with their own major version.
-- **MINOR** and **PATCH** cover everything else.
+- **MINOR** covers backwards-compatible additions; **PATCH** covers fixes that keep the existing interface.
 
 Every change to `media-controls.js` must raise the version; the test workflow checks this.
 To roll back, publish the earlier code under a new, higher version.
