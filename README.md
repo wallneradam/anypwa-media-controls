@@ -6,7 +6,9 @@ connection and background profiles that switch between them.
 
 It works through the website's own player. It chooses which stream that player loads,
 and never writes volume or mute, never wraps play, pause or seek, and never reloads the
-page or replaces the player.
+page or replaces the player. Background compatibility may resume a recent native WebKit
+pause when a trusted visibility event confirms the document lost focus; explicit pause,
+a changed source, and removed or ended videos remain paused.
 
 ## How the app uses it
 
@@ -27,7 +29,10 @@ Every push to `main` reaches the installed apps.
 The adapter is passive until the app calls `configure({audioOnly, quality, background})`.
 Version 1.1.0 adds the backwards-compatible `disable()` method: it stops preference enforcement and artwork polling,
 cancels pending HLS work, and leaves the website's current stream, pause state and choices
-untouched. The real pointer-press compatibility forwarding stays available while disabled.
+untouched. The real pointer-press compatibility forwarding and free background-playback compatibility
+stay available while disabled. Version 1.1.1 pairs a recent native pause with a trusted
+visibility event and native document focus, because some WebKit versions keep reporting
+`visible` during backgrounding. It does not require a Media Controls purchase.
 The app calls `disable()` when the Media Controls purchase is absent or revoked.
 
 ## Versioning

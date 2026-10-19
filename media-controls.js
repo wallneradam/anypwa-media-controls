@@ -1,7 +1,7 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.1.0
+ * @version 1.1.1
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
@@ -9,7 +9,53 @@
 (() => {
     'use strict';
     const hosts = new Set(['music.youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube.com']);
-    if (!hosts.has(location.hostname) || window.__anyPWAMediaControls) return;
+    if (!hosts.has(location.hostname)) return;
+
+    // Some WebKit versions report visible through the background transition. Focus still
+    // changes; pair that trusted event with a recent native pause from the bundled module.
+    if (window.__anyPWABackgroundMedia && !window.__anyPWABackgroundResume
+        && typeof document.hasFocus === 'function' && typeof HTMLMediaElement.prototype.play === 'function') {
+        const hasFocus = document.hasFocus.bind(document);
+        const play = HTMLMediaElement.prototype.play;
+        let pending = null;
+        let timer = null;
+        const cancel = () => {
+            pending = null;
+            if (timer !== null) clearTimeout(timer);
+            timer = null;
+        };
+        const record = event => {
+            const media = event.target;
+            if (!event.isTrusted || !(media instanceof HTMLVideoElement)) return;
+            cancel();
+            if (media.userHitPause !== false || !media.isConnected || media.ended || !media.currentSrc) return;
+            pending = { media, source: media.currentSrc, at: Date.now() };
+            timer = setTimeout(cancel, 2000);
+        };
+        const changed = event => {
+            if (pending?.media === event.target) cancel();
+        };
+        const resume = event => {
+            if (!event.isTrusted || !pending) return;
+            const { media, source, at } = pending;
+            cancel();
+            if (!hasFocus() && Date.now() - at < 2000 && media.paused && media.userHitPause === false
+                && media.isConnected && !media.ended && media.currentSrc === source) {
+                play.call(media)?.catch(() => {});
+            }
+        };
+        document.addEventListener('pause', record, true);
+        for (const type of ['play', 'emptied', 'ended']) document.addEventListener(type, changed, true);
+        document.addEventListener('visibilitychange', resume);
+        window.__anyPWABackgroundResume = () => {
+            cancel();
+            document.removeEventListener('pause', record, true);
+            for (const type of ['play', 'emptied', 'ended']) document.removeEventListener(type, changed, true);
+            document.removeEventListener('visibilitychange', resume);
+            delete window.__anyPWABackgroundResume;
+        };
+    }
+    if (window.__anyPWAMediaControls) return;
 
     // YouTube's iPhone player starts a video unmuted only when its pool of <video> elements,
     // filled from a window touchstart listener, is not empty. Mouse and trackpad presses
@@ -758,6 +804,7 @@
     };
 
     const dispose = () => {
+        window.__anyPWABackgroundResume?.();
         window.removeEventListener('pointerdown', forwardPointerPress, { capture: true });
         document.removeEventListener('pause', recordPause, true);
         for (const type of ['loadeddata', 'playing']) document.removeEventListener(type, scheduleReconcile, true);

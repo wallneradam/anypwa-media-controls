@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 const source = readFileSync(new URL('../media-controls.js', import.meta.url), 'utf8');
 
-function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapper = false, mse = false, fetch } = {}) {
+function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapper = false, mse = false, fetch, background = false } = {}) {
     const calls = [];
     const response = { videoDetails: { videoId: 'clip', title: 'Fixture clip', thumbnail: { thumbnails: [
         { url: 'https://i.ytimg.com/vi/clip/small.jpg', width: 320 },
@@ -13,6 +13,7 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
         { url: 'https://i.ytimg.com/vi/clip/large.jpg', width: 1920 }
     ] } }, streamingData: { formats: [{ itag: 18 }] } };
     class FixtureMedia {
+        play() { this.playCalls = (this.playCalls || 0) + 1; this.paused = false; return Promise.resolve(); }
         get duration() { return this.nativeDuration ?? NaN; }
         addEventListener(type, listener, options) {
             const listeners = this.listeners.get(type) || new Map();
@@ -29,6 +30,7 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
         }
     }
     const media = Object.assign(new FixtureMedia(), { paused, videoWidth: 854, readyState: 4, events: [], listeners: new Map() });
+    if (background) Object.assign(media, { isConnected: true, ended: false, currentSrc: 'blob:clip', userHitPause: false });
     const stats = { fmt: '244', afmt: '251' };
     const images = [];
     const timers = new Map();
@@ -74,6 +76,8 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
         dispatchEvent: event => { windowEvents.push(event); return true; },
         URL,
         HTMLMediaElement: FixtureMedia,
+        HTMLVideoElement: FixtureMedia,
+        __anyPWABackgroundMedia: background,
         Event,
         AbortController,
         setTimeout: callback => { const id = ++nextTimer; timeouts.set(id, callback); return id; },
@@ -81,6 +85,7 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
         setInterval: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
         clearInterval: id => timers.delete(id),
         document: {
+            hasFocus: () => context.focused !== false,
             addEventListener: (type, listener, options) => documentListeners.push({ type, listener, options }),
             removeEventListener: (type, listener) => {
                 const index = documentListeners.findIndex(entry => entry.type === type && entry.listener === listener);
@@ -1161,4 +1166,59 @@ test('without MediaSource a ready source that never switches fails after 10 s', 
     f.tick();
     assert.equal(publications.at(-1).status, 'failed');
     f.controls.dispose();
+});
+
+
+test('background compatibility resumes a recent native pause even with spoofed visibility and locked controls', () => {
+    for (const host of ['m.youtube.com', 'music.youtube.com']) {
+        const f = fixture({ host, background: true });
+        f.controls.disable();
+        f.context.document.visibilityState = 'visible';
+        f.context.document.hidden = false;
+        const emit = (type, values = {}) => {
+            for (const entry of [...f.documentListeners].filter(entry => entry.type === type)) {
+                entry.listener({ type, target: f.media, isTrusted: true, ...values });
+            }
+        };
+        f.media.paused = true;
+        emit('pause');
+        f.context.focused = false;
+        emit('visibilitychange');
+        assert.equal(f.media.playCalls, 1, host);
+        emit('visibilitychange');
+        assert.equal(f.media.playCalls, 1, 'one pause may resume only once');
+        assert.equal(f.calls.length, 0, 'free background playback must not configure streams');
+        assert.equal(f.timers.size, 0, 'locked controls must not start polling');
+        vm.runInContext(source, f.context);
+        assert.equal(f.documentListeners.filter(entry => entry.type === 'visibilitychange').length, 1);
+        f.controls.dispose();
+        assert.equal(f.documentListeners.length, 0);
+        assert.equal(f.context.__anyPWABackgroundResume, undefined);
+    }
+});
+
+test('background compatibility preserves pause intent, media identity, focus and interruption boundaries', () => {
+    for (const scenario of ['explicit pause', 'later explicit pause', 'source changed', 'detached', 'ended',
+        'foreground', 'expired', 'play', 'emptied', 'ended event', 'synthetic pause', 'synthetic visibility']) {
+        const f = fixture({ background: true });
+        f.controls.disable();
+        const emit = (type, values = {}) => {
+            for (const entry of [...f.documentListeners].filter(entry => entry.type === type)) {
+                entry.listener({ type, target: f.media, isTrusted: true, ...values });
+            }
+        };
+        f.media.paused = true;
+        if (scenario === 'explicit pause') f.media.userHitPause = true;
+        emit('pause', { isTrusted: scenario !== 'synthetic pause' });
+        if (scenario === 'later explicit pause') f.media.userHitPause = true;
+        if (scenario === 'source changed') f.media.currentSrc = 'blob:another';
+        if (scenario === 'detached') f.media.isConnected = false;
+        if (scenario === 'ended') f.media.ended = true;
+        if (['play', 'emptied', 'ended event'].includes(scenario)) emit(scenario === 'ended event' ? 'ended' : scenario);
+        if (scenario === 'expired') for (const callback of [...f.timeouts.values()]) callback();
+        f.context.focused = scenario === 'foreground';
+        emit('visibilitychange', { isTrusted: scenario !== 'synthetic visibility' });
+        assert.equal(f.media.playCalls || 0, 0, scenario);
+        f.controls.dispose();
+    }
 });
