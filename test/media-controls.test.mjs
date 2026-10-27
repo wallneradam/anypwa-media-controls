@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 const source = readFileSync(new URL('../media-controls.js', import.meta.url), 'utf8');
 
-function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapper = false, mse = false, fetch, background = false } = {}) {
+function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapper = false, mse = false, fetch, background = false, bundledBackground = false } = {}) {
     const calls = [];
     const response = { videoDetails: { videoId: 'clip', title: 'Fixture clip', thumbnail: { thumbnails: [
         { url: 'https://i.ytimg.com/vi/clip/small.jpg', width: 320 },
@@ -78,6 +78,7 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
         HTMLMediaElement: FixtureMedia,
         HTMLVideoElement: FixtureMedia,
         __anyPWABackgroundMedia: background,
+        __anyPWABackgroundResume: bundledBackground ? () => {} : undefined,
         Event,
         AbortController,
         setTimeout: callback => { const id = ++nextTimer; timeouts.set(id, callback); return id; },
@@ -1176,7 +1177,7 @@ test('background compatibility resumes a recent native pause even with spoofed v
         f.context.document.visibilityState = 'visible';
         f.context.document.hidden = false;
         const emit = (type, values = {}) => {
-            for (const entry of [...f.documentListeners].filter(entry => entry.type === type)) {
+            for (const entry of [...f.documentListeners, ...f.windowListeners].filter(entry => entry.type === type)) {
                 entry.listener({ type, target: f.media, isTrusted: true, ...values });
             }
         };
@@ -1190,9 +1191,10 @@ test('background compatibility resumes a recent native pause even with spoofed v
         assert.equal(f.calls.length, 0, 'free background playback must not configure streams');
         assert.equal(f.timers.size, 0, 'locked controls must not start polling');
         vm.runInContext(source, f.context);
-        assert.equal(f.documentListeners.filter(entry => entry.type === 'visibilitychange').length, 1);
+        assert.equal([...f.documentListeners, ...f.windowListeners].filter(entry => entry.type === 'visibilitychange').length, 1);
         f.controls.dispose();
         assert.equal(f.documentListeners.length, 0);
+        assert.equal(f.windowListeners.filter(entry => entry.type === 'visibilitychange').length, 0);
         assert.equal(f.context.__anyPWABackgroundResume, undefined);
     }
 });
@@ -1203,7 +1205,7 @@ test('background compatibility preserves pause intent, media identity, focus and
         const f = fixture({ background: true });
         f.controls.disable();
         const emit = (type, values = {}) => {
-            for (const entry of [...f.documentListeners].filter(entry => entry.type === type)) {
+            for (const entry of [...f.documentListeners, ...f.windowListeners].filter(entry => entry.type === type)) {
                 entry.listener({ type, target: f.media, isTrusted: true, ...values });
             }
         };
@@ -1219,6 +1221,89 @@ test('background compatibility preserves pause intent, media identity, focus and
         f.context.focused = scenario === 'foreground';
         emit('visibilitychange', { isTrusted: scenario !== 'synthetic visibility' });
         assert.equal(f.media.playCalls || 0, 0, scenario);
+        f.controls.dispose();
+    }
+});
+
+
+test('bundled JavaScript recovery excludes the legacy focus recovery even while controls are locked', () => {
+    const f = fixture({ background: true, bundledBackground: true });
+    f.controls.disable();
+    assert.equal(typeof f.context.__anyPWABackgroundResume, 'function');
+    assert.equal(f.documentListeners.filter(entry => entry.type === 'visibilitychange').length, 0);
+    f.controls.dispose();
+});
+
+
+test('background recovery republishes artwork only after the same video successfully resumes', async () => {
+    for (const outcome of ['success', 'rejected', 'paused again', 'source changed']) {
+        const f = fixture({ host: 'music.youtube.com', background: true });
+        f.controls.disable();
+        let publications = 0;
+        f.context.__anyPWAPublishMediaMetadata = () => { publications++; };
+        let resolvePlay, rejectPlay;
+        f.context.HTMLMediaElement.prototype.play = function () {
+            this.paused = false;
+            return new Promise((resolve, reject) => { resolvePlay = resolve; rejectPlay = reject; });
+        };
+        // Install a fresh copy to capture this native play implementation.
+        f.controls.dispose();
+        vm.runInContext(source, f.context);
+        f.context.__anyPWAMediaControls.disable();
+        f.media.paused = true;
+        const emit = type => {
+            for (const entry of [...f.documentListeners, ...f.windowListeners].filter(entry => entry.type === type)) {
+                entry.listener({type, target: f.media, isTrusted: true});
+            }
+        };
+        emit('pause');
+        f.context.focused = false;
+        emit('visibilitychange');
+        assert.equal(publications, 0, 'never republish before play succeeds');
+        if (outcome === 'rejected') rejectPlay(new Error('interrupted'));
+        else {
+            if (outcome === 'paused again') f.media.paused = true;
+            if (outcome === 'source changed') f.media.currentSrc = 'blob:replacement';
+            resolvePlay();
+        }
+        await settle();
+        assert.equal(publications, outcome === 'success' ? 1 : 0, outcome);
+        f.context.__anyPWAMediaControls.dispose();
+    }
+});
+
+test('Music captures visibility before document interception without a delayed play; YouTube timing stays unchanged', () => {
+    for (const host of ['music.youtube.com', 'm.youtube.com']) {
+        const f = fixture({host, background:true});
+        f.controls.disable();
+        const emitPause = () => {
+            f.media.paused = true;
+            for (const entry of f.documentListeners.filter(entry => entry.type === 'pause')) {
+                entry.listener({type:'pause', target:f.media, isTrusted:true});
+            }
+        };
+        emitPause();
+        f.context.focused = false;
+        assert.equal(f.media.playCalls || 0, 0, 'pause alone is too early');
+        assert.equal(f.windowListeners.filter(entry => entry.type === 'blur').length, 0);
+        const listeners = host === 'music.youtube.com' ? f.windowListeners : f.documentListeners;
+        const visibility = listeners.filter(entry => entry.type === 'visibilitychange');
+        assert.equal(visibility.length, 1);
+        assert.equal(visibility[0].options, host === 'music.youtube.com');
+        visibility[0].listener({type:'visibilitychange', target:f.context.document, isTrusted:true});
+        assert.equal(f.media.playCalls, 1, 'resume in the event handler, without advancing timers');
+        assert.equal(f.timeouts.size, 0);
+        // Later transitions with no pause do not restart the video.
+        for (let cycle = 0; cycle < 2; cycle++) {
+            visibility[0].listener({type:'visibilitychange', target:f.context.document, isTrusted:true});
+            assert.equal(f.media.playCalls, 1);
+        }
+        emitPause();
+        for (const callback of [...f.timeouts.values()]) callback();
+        assert.equal(f.media.playCalls, 1, 'expiry only cancels; it must never start playback');
+        visibility[0].listener({type:'visibilitychange', target:f.context.document, isTrusted:true});
+        assert.equal(f.media.playCalls, 1, 'expired pauses cannot resume');
+        assert.equal(f.calls.length, 0, 'no stream or quality changes');
         f.controls.dispose();
     }
 });

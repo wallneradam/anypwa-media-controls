@@ -32,7 +32,14 @@ cancels pending HLS work, and leaves the website's current stream, pause state a
 untouched. The real pointer-press compatibility forwarding and free background-playback compatibility
 stay available while disabled. Version 1.1.1 pairs a recent native pause with a trusted
 visibility event and native document focus, because some WebKit versions keep reporting
-`visible` during backgrounding. It does not require a Media Controls purchase.
+`visible` during backgrounding. A recovery ownership marker prevents this compatibility path from installing twice.
+Version 1.1.2 republishes the existing media artwork after a successful background resume.
+YouTube retains the version 1.1.1 visibility timing. Music listens in the window capture
+phase so page handlers cannot prevent its visibility event reaching the recovery listener.
+Recovery runs directly on that event after a recent native pause and loss of focus.
+The two-second expiry only discards stale pauses; it never starts playback.
+It does not resume on window blur, poll playback, or change streams.
+It does not require a Media Controls purchase.
 The app calls `disable()` when the Media Controls purchase is absent or revoked.
 
 ## Versioning

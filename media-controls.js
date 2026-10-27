@@ -1,7 +1,7 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.1.1
+ * @version 1.1.2
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
@@ -17,6 +17,8 @@
         && typeof document.hasFocus === 'function' && typeof HTMLMediaElement.prototype.play === 'function') {
         const hasFocus = document.hasFocus.bind(document);
         const play = HTMLMediaElement.prototype.play;
+        const captureVisibility = location.hostname === 'music.youtube.com';
+        const visibilityTarget = captureVisibility ? window : document;
         let pending = null;
         let timer = null;
         const cancel = () => {
@@ -41,17 +43,22 @@
             cancel();
             if (!hasFocus() && Date.now() - at < 2000 && media.paused && media.userHitPause === false
                 && media.isConnected && !media.ended && media.currentSrc === source) {
-                play.call(media)?.catch(() => {});
+                play.call(media)?.then(() => {
+                    if (!media.paused && !media.ended && media.currentSrc === source) {
+                        window.__anyPWAPublishMediaMetadata?.();
+                    }
+                }).catch(() => {});
             }
         };
         document.addEventListener('pause', record, true);
         for (const type of ['play', 'emptied', 'ended']) document.addEventListener(type, changed, true);
-        document.addEventListener('visibilitychange', resume);
+        // Music intercepts visibilitychange before it reaches document listeners.
+        visibilityTarget.addEventListener('visibilitychange', resume, captureVisibility);
         window.__anyPWABackgroundResume = () => {
             cancel();
             document.removeEventListener('pause', record, true);
             for (const type of ['play', 'emptied', 'ended']) document.removeEventListener(type, changed, true);
-            document.removeEventListener('visibilitychange', resume);
+            visibilityTarget.removeEventListener('visibilitychange', resume, captureVisibility);
             delete window.__anyPWABackgroundResume;
         };
     }
