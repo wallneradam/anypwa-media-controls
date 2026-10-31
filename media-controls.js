@@ -1,7 +1,7 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.1.2
+ * @version 1.1.3
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
@@ -293,7 +293,7 @@
             artwork = document.createElement('img');
             artwork.setAttribute('data-anypwa-audio-artwork', '');
             artwork.draggable = false;
-            artwork.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;';
+            artwork.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;display:none;';
             artwork.hidden = true;
             api.appendChild(artwork);
         }
@@ -312,11 +312,14 @@
                 if (image !== artwork || artworkKey !== key) return;
                 loadedArtworkKey = null;
                 image.hidden = true;
+                image.style.display = 'none';
             };
             image.alt = response.videoDetails.title || 'Video thumbnail';
             image.src = url;
         }
         artwork.hidden = loadedArtworkKey !== key;
+        // Music's mini-player hides direct player children; override that only for our loaded image.
+        artwork.style.display = artwork.hidden ? 'none' : 'block';
         return !artwork.hidden;
     };
 

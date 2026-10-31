@@ -438,6 +438,27 @@ test('confirmed audio-only displays the current thumbnail without touching playb
     assert.equal(f.timers.size, 0);
 });
 
+test('artwork explicitly controls display after loading and on image failure', () => {
+    for (const host of ['music.youtube.com', 'm.youtube.com']) {
+        const f = fixture({ host });
+        f.stats.fmt = '0';
+        f.controls.configure({ audioOnly: true, quality: 'auto' });
+        const image = f.images[0];
+        assert.match(image.style.cssText, /display:none/);
+        assert.equal(image.style.display, 'none');
+        image.onload();
+        assert.equal(image.style.display, 'block');
+        assert.equal(image.hidden, false);
+        image.onerror();
+        assert.equal(image.style.display, 'none');
+        assert.equal(image.hidden, true);
+        f.controls.refreshArtwork();
+        assert.equal(image.style.display, 'none');
+        f.controls.disable();
+        assert.equal(image.isConnected, false);
+    }
+});
+
 test('track changes replace artwork only for matching queue identity and loaded image', () => {
     const f = fixture();
     f.stats.fmt = '0';
