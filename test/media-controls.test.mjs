@@ -81,6 +81,7 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
         __anyPWABackgroundResume: bundledBackground ? () => {} : undefined,
         Event,
         AbortController,
+        MutationObserver: class { observe() {} disconnect() {} },
         setTimeout: callback => { const id = ++nextTimer; timeouts.set(id, callback); return id; },
         clearTimeout: id => timeouts.delete(id),
         setInterval: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
@@ -101,7 +102,7 @@ function fixture({ host = 'music.youtube.com', paused = false, ad = false, wrapp
             },
             querySelector: selector => selector === 'ytmusic-player'
                 ? { 'JSC$changed_playerController': controller }
-                : media
+                : selector === 'ytmusic-app-layout[inert]' ? null : media
         }
     });
     context.window = context;

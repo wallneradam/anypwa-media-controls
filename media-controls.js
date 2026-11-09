@@ -1,7 +1,7 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.1.3
+ * @version 1.1.4
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
@@ -64,6 +64,54 @@
     }
     if (window.__anyPWAMediaControls) return;
 
+    const music = location.hostname === 'music.youtube.com';
+    let promoObserver;
+    if (music) {
+        const promoTag = 'ytmusic-mealbar-promo-renderer';
+        const promoSelector = `ytmusic-popup-container [role="dialog"] > ${promoTag}`;
+        const dismissSelector = 'yt-button-renderer[dialog-dismiss] button:enabled:not([aria-disabled="true"])';
+        let removedHideRule = false;
+        let dismissedButton = null;
+        const dismissPromo = () => {
+            if (!document.querySelector('ytmusic-app-layout[inert]')) {
+                dismissedButton = null;
+                return;
+            }
+            const promos = document.querySelectorAll(promoSelector);
+            if (!promos.length) return;
+            if (!removedHideRule) {
+                // anyPWA inserts cosmetic rules into an empty style under the document root.
+                for (const sheet of document.styleSheets) {
+                    const style = sheet.ownerNode;
+                    if (style?.localName !== 'style' || style.parentNode !== document.documentElement || style.textContent) continue;
+                    for (const rule of sheet.cssRules) {
+                        if (rule.selectorText === promoTag && rule.style.length === 1
+                            && rule.style.getPropertyValue('display') === 'none'
+                            && rule.style.getPropertyPriority('display') === 'important') {
+                            rule.style.removeProperty('display');
+                            removedHideRule = true;
+                        }
+                    }
+                }
+                if (!removedHideRule) return;
+            }
+            for (const promo of promos) {
+                const button = promo.querySelector(dismissSelector);
+                if (!button || button === dismissedButton || !button.getClientRects().length
+                    || getComputedStyle(button).visibility !== 'visible') continue;
+                dismissedButton = button;
+                button.click();
+                return;
+            }
+        };
+        promoObserver = new MutationObserver(dismissPromo);
+        promoObserver.observe(document, {
+            subtree: true, childList: true, attributes: true,
+            attributeFilter: ['inert', 'hidden', 'aria-hidden', 'disabled', 'aria-disabled', 'style']
+        });
+        dismissPromo();
+    }
+
     // YouTube's iPhone player starts a video unmuted only when its pool of <video> elements,
     // filled from a window touchstart listener, is not empty. Mouse and trackpad presses
     // (Mac, iPad pointer) never produce touchstart, so forward the real press as that signal.
@@ -76,7 +124,6 @@
     };
     window.addEventListener('pointerdown', forwardPointerPress, { capture: true, passive: true });
 
-    const music = location.hostname === 'music.youtube.com';
     const player = () => document.getElementById('movie_player');
     let artwork = null;
     let artworkKey = null;
@@ -814,6 +861,7 @@
     };
 
     const dispose = () => {
+        promoObserver?.disconnect();
         window.__anyPWABackgroundResume?.();
         window.removeEventListener('pointerdown', forwardPointerPress, { capture: true });
         document.removeEventListener('pause', recordPause, true);
