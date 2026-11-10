@@ -1,13 +1,52 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.1.4
+ * @version 1.1.5
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
  */
 (() => {
     'use strict';
+    if (/^(?:www\.|m\.|sh\.)?reddit\.com$/.test(location.hostname)) {
+        let observer;
+        window.__anyPWAFixRedditAppPromo ??= () => {
+            if (observer) return;
+            const promoSelector = [
+                '[id^="app-upsell-blocking-bottom-sheet-"]',
+                '[id^="configured-xpromo-mweb3x_mid_funnel_blocking"]',
+                '#xpromo-bottom-sheet',
+                'xpromo-new-app-selector'
+            ].join(', ');
+            const lockClasses = ['rpl-scroll-lock', 'scroll-is-blocked'];
+            const releasePromo = () => {
+                const promos = document.querySelectorAll(promoSelector);
+                if (!promos.length) return;
+                for (const promo of promos) promo.remove();
+                // A sign-in or other site dialog can own the same scroll lock.
+                if ([...document.querySelectorAll(':modal, [role="dialog"][aria-modal="true"]')]
+                    .some(dialog => dialog.getClientRects().length)) return;
+                for (const root of [document.documentElement, document.body]) {
+                    if (!root) continue;
+                    if (lockClasses.some(name => root.classList.contains(name))) root.classList.remove(...lockClasses);
+                    root.removeAttribute('m-scroll-lock');
+                    for (const [property, values] of [
+                        ['overflow-x', ['hidden', 'clip']],
+                        ['overflow-y', ['hidden', 'clip']],
+                        ['position', ['fixed']],
+                        ['pointer-events', ['none']],
+                        ['touch-action', ['none']]
+                    ]) {
+                        if (values.includes(root.style.getPropertyValue(property))) root.style.removeProperty(property);
+                    }
+                }
+            };
+            observer = new MutationObserver(releasePromo);
+            observer.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['id'] });
+            releasePromo();
+        };
+        return;
+    }
     const hosts = new Set(['music.youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube.com']);
     if (!hosts.has(location.hostname)) return;
 
