@@ -1,7 +1,7 @@
 /*!
  * anyPWA Media Controls
  * https://github.com/wallneradam/anypwa-media-controls
- * @version 1.1.5
+ * @version 1.1.6
  *
  * Copyright (C) 2026 Adam Wallner
  * SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-anyPWA-Commercial
@@ -9,6 +9,7 @@
 (() => {
     'use strict';
     if (/^(?:www\.|m\.|sh\.)?reddit\.com$/.test(location.hostname)) {
+        // BEGIN Reddit compatibility installer
         let observer;
         window.__anyPWAFixRedditAppPromo ??= () => {
             if (observer) return;
@@ -45,6 +46,7 @@
             observer.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['id'] });
             releasePromo();
         };
+        // END Reddit compatibility installer
         return;
     }
     const hosts = new Set(['music.youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube.com']);
